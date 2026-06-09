@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+from uuid import UUID
+
+from qdrant_client import QdrantClient, models
+
+
+class QdrantChunkStore:
+    def __init__(self, client: QdrantClient, collection_name: str) -> None:
+        self.client = client
+        self.collection_name = collection_name
+
+    def ensure_collection(self, vector_size: int) -> None:
+        if self.client.collection_exists(self.collection_name):
+            return
+        self.client.create_collection(
+            collection_name=self.collection_name,
+            vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE),
+        )
+
+    def upsert_chunks(self, *, points: Sequence[models.PointStruct]) -> None:
+        self.client.upsert(collection_name=self.collection_name, points=list(points), wait=True)
+
+    def search(
+        self,
+        *,
+        query_vector: Sequence[float],
+        limit: int,
+        document_id: UUID | None = None,
+        source: str | None = None,
+    ) -> list[models.ScoredPoint]:
+        query_filter = self._build_filter(document_id=document_id, source=source)
+        response = self.client.query_points(
+            collection_name=self.collection_name,
+            query=list(query_vector),
+            query_filter=query_filter,
+            limit=limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+        return response.points
+
+    def delete_document(self, document_id: UUID) -> None:
+        self.client.delete(
+            collection_name=self.collection_name,
+            points_selector=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="document_id",
+                        match=models.MatchValue(value=str(document_id)),
+                    )
+                ]
+            ),
+            wait=True,
+        )
+
+    def health(self) -> bool:
+        self.client.get_collections()
+        return True
+
+    def _build_filter(
+        self,
+        *,
+        document_id: UUID | None = None,
+        source: str | None = None,
+    ) -> models.Filter | None:
+        must: list[models.FieldCondition] = []
+        if document_id is not None:
+            must.append(
+                models.FieldCondition(
+                    key="document_id",
+                    match=models.MatchValue(value=str(document_id)),
+                )
+            )
+        if source is not None:
+            must.append(
+                models.FieldCondition(
+                    key="source",
+                    match=models.MatchValue(value=source),
+                )
+            )
+        if not must:
+            return None
+        return models.Filter(must=must)
+
