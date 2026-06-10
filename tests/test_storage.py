@@ -93,3 +93,31 @@ def test_pdf_processing_extracts_text(tmp_path: Path):
     assert result.page_count == 1
     assert "Simple PDF text extraction" in result.content
     assert result.parser_name in {"pymupdf", "table-aware"}
+
+
+def test_pdf_processing_uses_scanner_client_for_scanned_pdf(tmp_path: Path):
+    class FakeScannerClient:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def ocr_pdf(self, pdf_path: Path, *, language: str) -> bytes:
+            self.calls.append((pdf_path, language))
+            return pdf_path.read_bytes()
+
+    pdf_path = tmp_path / "scan.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "OCR fallback test")
+    pdf_path.write_bytes(doc.tobytes())
+
+    scanner = FakeScannerClient()
+    extractor = PdfProcessingService(
+        pdf_text_threshold=10_000,
+        pdf_image_threshold=0,
+        pdf_scanner_client=scanner,
+        pdf_scanner_language="eng",
+    )
+    result = extractor.extract(pdf_path)
+
+    assert scanner.calls == [(pdf_path, "eng")]
+    assert result.parser_name == "ocr"
