@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import UUID
 
+from app.adapters.pdf_scanner_client import PdfScannerClient
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.dependencies import build_storage_service
@@ -56,6 +57,11 @@ def process_uploaded_document(job_id: str) -> dict[str, object]:
         extractor = PdfProcessingService(
             pdf_text_threshold=settings.pdf_text_threshold,
             pdf_image_threshold=settings.pdf_image_threshold,
+            pdf_scanner_client=PdfScannerClient(
+                target=settings.pdf_scanner_grpc_url,
+                max_message_mb=settings.pdf_scanner_max_mb,
+            ),
+            pdf_scanner_language=settings.pdf_scanner_language,
         )
         extracted = extractor.extract(file_path)
         service.update_job_progress(

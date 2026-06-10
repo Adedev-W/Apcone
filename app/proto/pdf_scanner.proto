@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package apcone.pdfscanner;
+
+service PdfScanner {
+  rpc OcrPdf (OcrPdfRequest) returns (OcrPdfResponse);
+  rpc Health (HealthRequest) returns (HealthResponse);
+}
+
+message OcrPdfRequest {
+  bytes pdf = 1;
+  string filename = 2;
+  string language = 3;
+}
+
+message OcrPdfResponse {
+  bytes pdf = 1;
+  string parser_name = 2;
+  string message = 3;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  string message = 2;
+}

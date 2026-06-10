@@ -90,6 +90,8 @@ def delete_document(document_id: UUID) -> dict[str, str]:
     return {"status": "deleted", "document_id": str(document_id)}
 
 
+
+
 @mcp.tool(name="health")
 def health() -> dict[str, Any]:
     settings = get_settings()

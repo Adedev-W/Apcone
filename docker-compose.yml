@@ -1,4 +1,17 @@
 services:
+  pdf-scanner:
+    build:
+      context: .
+      dockerfile: docker/pdf-scanner/Dockerfile
+    container_name: apcone-pdf-scanner
+    restart: unless-stopped
+    environment:
+      PDF_SCANNER_GRPC_PORT: 50051
+      PDF_SCANNER_LANGUAGE: ${PDF_SCANNER_LANGUAGE:-eng}
+      PDF_SCANNER_MAX_MB: ${PDF_SCANNER_MAX_MB:-100}
+    ports:
+      - "127.0.0.1:${PDF_SCANNER_GRPC_PORT:-50051}:50051"
+
   postgres:
     image: postgres:18.4
     container_name: apcone-postgres

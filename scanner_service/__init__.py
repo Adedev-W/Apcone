@@ -1,0 +1,2 @@
+"""PDF scanner gRPC service."""
+

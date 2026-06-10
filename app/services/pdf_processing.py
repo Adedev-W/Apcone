@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import dataclasses
-import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 
 import fitz
 import pdfplumber
+
+from app.adapters.pdf_scanner_client import PdfScannerClient, PdfScannerClientError
 
 
 @dataclasses.dataclass(slots=True)
@@ -38,36 +38,44 @@ class PdfProcessingService:
         *,
         pdf_text_threshold: int = 80,
         pdf_image_threshold: int = 1,
+        pdf_scanner_client: PdfScannerClient | None = None,
+        pdf_scanner_language: str = "eng",
     ) -> None:
         self.pdf_text_threshold = pdf_text_threshold
         self.pdf_image_threshold = pdf_image_threshold
+        self.pdf_scanner_client = pdf_scanner_client
+        self.pdf_scanner_language = pdf_scanner_language
 
     def extract(self, pdf_path: Path) -> PdfExtractionResult:
         if not pdf_path.exists():
             raise PdfProcessingError(f"pdf file not found: {pdf_path}")
 
+        used_ocr = False
+        cleanup_path: Path | None = None
         with fitz.open(pdf_path) as doc:
             page_count = doc.page_count
             page_profiles = [self._profile_page(doc.load_page(index)) for index in range(page_count)]
 
         if self._needs_ocr(page_profiles):
             ocr_path = self._run_ocr(pdf_path)
-            if ocr_path is None:
-                raise PdfProcessingError(
-                    "scanned PDF detected but OCRmyPDF is not installed; install ocrmypdf+tesseract+ghostscript to enable OCR"
-                )
             pdf_path = ocr_path
+            cleanup_path = ocr_path
+            used_ocr = True
 
         pages: list[PdfPageExtraction] = []
         texts: list[str] = []
-        with fitz.open(pdf_path) as doc:
-            for index in range(doc.page_count):
-                profile = page_profiles[index] if index < len(page_profiles) else None
-                page = doc.load_page(index)
-                page_result = self._extract_page(page, pdf_path, profile)
-                pages.append(page_result)
-                if page_result.text.strip():
-                    texts.append(f"\n\n--- page {page_result.page_number} ---\n\n{page_result.text.strip()}")
+        try:
+            with fitz.open(pdf_path) as doc:
+                for index in range(doc.page_count):
+                    profile = page_profiles[index] if index < len(page_profiles) else None
+                    page = doc.load_page(index)
+                    page_result = self._extract_page(page, pdf_path, profile, used_ocr=used_ocr)
+                    pages.append(page_result)
+                    if page_result.text.strip():
+                        texts.append(f"\n\n--- page {page_result.page_number} ---\n\n{page_result.text.strip()}")
+        finally:
+            if cleanup_path is not None:
+                cleanup_path.unlink(missing_ok=True)
 
         parser_name = self._summarize_parser(pages)
         metadata = {
@@ -99,7 +107,14 @@ class PdfProcessingService:
                 scanned_pages += 1
         return scanned_pages > 0
 
-    def _extract_page(self, page: fitz.Page, pdf_path: Path, profile: dict[str, int] | None) -> PdfPageExtraction:
+    def _extract_page(
+        self,
+        page: fitz.Page,
+        pdf_path: Path,
+        profile: dict[str, int] | None,
+        *,
+        used_ocr: bool = False,
+    ) -> PdfPageExtraction:
         text_chars = profile["text_chars"] if profile else 0
         image_count = profile["image_count"] if profile else 0
 
@@ -112,7 +127,7 @@ class PdfProcessingService:
             parser_name = "pymupdf"
 
         if image_count >= self.pdf_image_threshold and text_chars < self.pdf_text_threshold:
-            parser_name = "ocr" if self._has_ocr_support() else "pymupdf"
+            parser_name = "ocr" if used_ocr else parser_name
 
         return PdfPageExtraction(
             page_number=page.number + 1,
@@ -158,27 +173,22 @@ class PdfProcessingService:
             rows.append("| " + " | ".join(padded) + " |")
         return "\n".join(rows)
 
-    def _has_ocr_support(self) -> bool:
-        return shutil.which("ocrmypdf") is not None
+    def _run_ocr(self, pdf_path: Path) -> Path:
+        if self.pdf_scanner_client is None:
+            raise PdfProcessingError("scanned PDF detected but PDF scanner gRPC client is not configured")
 
-    def _run_ocr(self, pdf_path: Path) -> Path | None:
-        if not self._has_ocr_support():
-            return None
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_path = Path(tmpdir) / f"{pdf_path.stem}.ocr.pdf"
-            subprocess.run(
-                [
-                    "ocrmypdf",
-                    "--force-ocr",
-                    "--quiet",
-                    str(pdf_path),
-                    str(output_path),
-                ],
-                check=True,
-            )
-            if not output_path.exists():
-                return None
-            return output_path
+        try:
+            ocr_pdf = self.pdf_scanner_client.ocr_pdf(pdf_path, language=self.pdf_scanner_language)
+        except PdfScannerClientError as exc:
+            raise PdfProcessingError(f"PDF scanner OCR failed: {exc}") from exc
+
+        with tempfile.NamedTemporaryFile(
+            prefix=f"{pdf_path.stem}.",
+            suffix=".ocr.pdf",
+            delete=False,
+        ) as output:
+            output.write(ocr_pdf)
+            return Path(output.name)
 
     def _summarize_parser(self, pages: list[PdfPageExtraction]) -> str:
         parser_names = {page.parser_name for page in pages if page.parser_name}

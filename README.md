@@ -56,4 +56,10 @@ Worker:
 uv run python -m app.workers.run_worker
 ```
 
-PDF OCR fallback is optional. If you want scanned PDFs to be processed automatically, install `ocrmypdf`, `tesseract`, and `ghostscript` on the machine running the worker.
+PDF OCR fallback runs through the Alpine-based gRPC scanner service:
+
+```bash
+docker compose up -d pdf-scanner
+```
+
+The worker calls `PDF_SCANNER_GRPC_URL`, which defaults to `127.0.0.1:50051`.
