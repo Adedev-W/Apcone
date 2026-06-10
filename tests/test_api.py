@@ -62,7 +62,7 @@ def test_api_pdf_upload_enqueues_background_job(client, monkeypatch, tmp_path):
     from app.routers import documents as documents_router
 
     fake_queue = FakeQueue()
-    monkeypatch.setattr(documents_router, "get_pdf_queue", lambda settings: fake_queue)
+    monkeypatch.setattr(documents_router, "get_pdf_profile_queue", lambda settings: fake_queue)
 
     pdf_path = tmp_path / "sample.pdf"
     _make_pdf(pdf_path, "PDF upload should be queued")

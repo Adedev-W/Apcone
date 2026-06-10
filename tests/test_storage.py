@@ -4,6 +4,7 @@ from pathlib import Path
 
 import fitz
 
+from app.adapters.pdf_scanner_client import PdfScannerResult
 from app.schemas import DocumentCreate
 from app.services.pdf_processing import PdfProcessingService
 from app.services.storage import RagStorageService
@@ -100,9 +101,25 @@ def test_pdf_processing_uses_scanner_client_for_scanned_pdf(tmp_path: Path):
         def __init__(self) -> None:
             self.calls = []
 
-        def ocr_pdf(self, pdf_path: Path, *, language: str) -> bytes:
-            self.calls.append((pdf_path, language))
-            return pdf_path.read_bytes()
+        def ocr_pdf(
+            self,
+            pdf_path: Path,
+            *,
+            language: str,
+            pages: list[int] | None = None,
+            mode: str = "text",
+        ) -> PdfScannerResult:
+            self.calls.append((pdf_path, language, pages, mode))
+            return PdfScannerResult(
+                pdf=b"",
+                text="OCR fallback test",
+                page_texts={1: "OCR fallback test"},
+                parser_name="ocr",
+                message="ok",
+                pages_processed=pages or [],
+                duration_ms=10,
+                warnings=[],
+            )
 
     pdf_path = tmp_path / "scan.pdf"
     doc = fitz.open()
@@ -119,5 +136,7 @@ def test_pdf_processing_uses_scanner_client_for_scanned_pdf(tmp_path: Path):
     )
     result = extractor.extract(pdf_path)
 
-    assert scanner.calls == [(pdf_path, "eng")]
+    assert scanner.calls == [(pdf_path, "eng", [1], "text")]
     assert result.parser_name == "ocr"
+    assert result.metadata["parser_strategy"] == "ocr_pages"
+    assert result.metadata["ocr_pages"] == [1]
