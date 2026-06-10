@@ -13,3 +13,26 @@ def get_redis_connection(settings: Settings) -> Redis:
 def get_pdf_queue(settings: Settings) -> Queue:
     return Queue(settings.pdf_queue_name, connection=get_redis_connection(settings))
 
+
+def get_pdf_profile_queue(settings: Settings) -> Queue:
+    return Queue(settings.pdf_profile_queue_name, connection=get_redis_connection(settings))
+
+
+def get_pdf_fast_queue(settings: Settings) -> Queue:
+    return Queue(settings.pdf_fast_queue_name, connection=get_redis_connection(settings))
+
+
+def get_pdf_ocr_queue(settings: Settings) -> Queue:
+    return Queue(settings.pdf_ocr_queue_name, connection=get_redis_connection(settings))
+
+
+def get_pdf_queues(settings: Settings) -> list[Queue]:
+    connection = get_redis_connection(settings)
+    queue_names = [
+        settings.pdf_profile_queue_name,
+        settings.pdf_fast_queue_name,
+        settings.pdf_ocr_queue_name,
+        settings.pdf_queue_name,
+    ]
+    unique_names = list(dict.fromkeys(queue_names))
+    return [Queue(name, connection=connection) for name in unique_names]

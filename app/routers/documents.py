@@ -21,7 +21,7 @@ from app.schemas import (
 )
 from app.services.file_storage import FileStorageService
 from app.services.storage import RagStorageService
-from app.tasks.rq_queue import get_pdf_queue
+from app.tasks.rq_queue import get_pdf_profile_queue
 from app.workers.pdf_jobs import process_uploaded_document
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -156,15 +156,26 @@ async def upload_document_background(
         page_count=None,
     )
     stored_path = file_storage.save_upload(job.id, content_file)
+    max_bytes = settings.pdf_max_mb * 1024 * 1024
+    if stored_path.stat().st_size > max_bytes:
+        stored_path.unlink(missing_ok=True)
+        service.mark_job_failed(job.id, f"uploaded file exceeds {settings.pdf_max_mb} MiB limit")
+        raise HTTPException(status_code=413, detail=f"uploaded file exceeds {settings.pdf_max_mb} MiB limit")
+
     job.storage_path = str(stored_path)
     job.source_name = source
     job.file_name = content_file.filename
     job.mime_type = content_file.content_type
     job.parser_name = "auto"
     service.db.commit()
-    queue = get_pdf_queue(settings)
+    queue = get_pdf_profile_queue(settings)
     try:
-        queue.enqueue(process_uploaded_document, str(job.id), job_timeout=1800, result_ttl=3600)
+        queue.enqueue(
+            process_uploaded_document,
+            str(job.id),
+            job_timeout=settings.pdf_job_timeout_seconds,
+            result_ttl=settings.pdf_result_ttl_seconds,
+        )
     except Exception as exc:  # pragma: no cover - enqueue failures are operational
         service.mark_job_failed(job.id, f"failed to enqueue background job: {exc}")
         raise HTTPException(status_code=503, detail="failed to enqueue background job") from exc

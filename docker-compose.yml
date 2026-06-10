@@ -9,8 +9,14 @@ services:
       PDF_SCANNER_GRPC_PORT: 50051
       PDF_SCANNER_LANGUAGE: ${PDF_SCANNER_LANGUAGE:-eng}
       PDF_SCANNER_MAX_MB: ${PDF_SCANNER_MAX_MB:-100}
+      PDF_SCANNER_WORKERS: ${PDF_SCANNER_WORKERS:-2}
+      PDF_SCANNER_OCR_JOBS: ${PDF_SCANNER_OCR_JOBS:-1}
+      PDF_SCANNER_TESSERACT_TIMEOUT: ${PDF_SCANNER_TESSERACT_TIMEOUT:-180}
+      PDF_SCANNER_ALLOWED_DIR: ${PDF_SCANNER_ALLOWED_DIR:-/storage/uploads}
     ports:
       - "127.0.0.1:${PDF_SCANNER_GRPC_PORT:-50051}:50051"
+    volumes:
+      - ./storage/uploads:/storage/uploads
 
   postgres:
     image: postgres:18.4

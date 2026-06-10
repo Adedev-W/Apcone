@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1b\x61pp/proto/pdf_scanner.proto\x12\x11\x61pcone.pdfscanner\"@\n\rOcrPdfRequest\x12\x0b\n\x03pdf\x18\x01 \x01(\x0c\x12\x10\n\x08\x66ilename\x18\x02 \x01(\t\x12\x10\n\x08language\x18\x03 \x01(\t\"C\n\x0eOcrPdfResponse\x12\x0b\n\x03pdf\x18\x01 \x01(\x0c\x12\x13\n\x0bparser_name\x18\x02 \x01(\t\x12\x0f\n\x07message\x18\x03 \x01(\t\"\x0f\n\rHealthRequest\"1\n\x0eHealthResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x0f\n\x07message\x18\x02 \x01(\t2\xaa\x01\n\nPdfScanner\x12M\n\x06OcrPdf\x12 .apcone.pdfscanner.OcrPdfRequest\x1a!.apcone.pdfscanner.OcrPdfResponse\x12M\n\x06Health\x12 .apcone.pdfscanner.HealthRequest\x1a!.apcone.pdfscanner.HealthResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1b\x61pp/proto/pdf_scanner.proto\x12\x11\x61pcone.pdfscanner\"r\n\rOcrPdfRequest\x12\x0b\n\x03pdf\x18\x01 \x01(\x0c\x12\x10\n\x08\x66ilename\x18\x02 \x01(\t\x12\x10\n\x08language\x18\x03 \x01(\t\x12\x13\n\x0bsource_path\x18\x04 \x01(\t\x12\r\n\x05pages\x18\x05 \x03(\x05\x12\x0c\n\x04mode\x18\x06 \x01(\t\"\xc5\x01\n\x0eOcrPdfResponse\x12\x0b\n\x03pdf\x18\x01 \x01(\x0c\x12\x13\n\x0bparser_name\x18\x02 \x01(\t\x12\x0f\n\x07message\x18\x03 \x01(\t\x12\x0c\n\x04text\x18\x04 \x01(\t\x12\x17\n\x0fpages_processed\x18\x05 \x03(\x05\x12\x13\n\x0b\x64uration_ms\x18\x06 \x01(\x03\x12\x10\n\x08warnings\x18\x07 \x03(\t\x12\x32\n\npage_texts\x18\x08 \x03(\x0b\x32\x1e.apcone.pdfscanner.OcrPageText\")\n\x0bOcrPageText\x12\x0c\n\x04page\x18\x01 \x01(\x05\x12\x0c\n\x04text\x18\x02 \x01(\t\"\x0f\n\rHealthRequest\"1\n\x0eHealthResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x0f\n\x07message\x18\x02 \x01(\t2\xaa\x01\n\nPdfScanner\x12M\n\x06OcrPdf\x12 .apcone.pdfscanner.OcrPdfRequest\x1a!.apcone.pdfscanner.OcrPdfResponse\x12M\n\x06Health\x12 .apcone.pdfscanner.HealthRequest\x1a!.apcone.pdfscanner.HealthResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,13 +32,15 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'app.proto.pdf_scanner_pb2',
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_OCRPDFREQUEST']._serialized_start=50
-  _globals['_OCRPDFREQUEST']._serialized_end=114
-  _globals['_OCRPDFRESPONSE']._serialized_start=116
-  _globals['_OCRPDFRESPONSE']._serialized_end=183
-  _globals['_HEALTHREQUEST']._serialized_start=185
-  _globals['_HEALTHREQUEST']._serialized_end=200
-  _globals['_HEALTHRESPONSE']._serialized_start=202
-  _globals['_HEALTHRESPONSE']._serialized_end=251
-  _globals['_PDFSCANNER']._serialized_start=254
-  _globals['_PDFSCANNER']._serialized_end=424
+  _globals['_OCRPDFREQUEST']._serialized_end=164
+  _globals['_OCRPDFRESPONSE']._serialized_start=167
+  _globals['_OCRPDFRESPONSE']._serialized_end=364
+  _globals['_OCRPAGETEXT']._serialized_start=366
+  _globals['_OCRPAGETEXT']._serialized_end=407
+  _globals['_HEALTHREQUEST']._serialized_start=409
+  _globals['_HEALTHREQUEST']._serialized_end=424
+  _globals['_HEALTHRESPONSE']._serialized_start=426
+  _globals['_HEALTHRESPONSE']._serialized_end=475
+  _globals['_PDFSCANNER']._serialized_start=478
+  _globals['_PDFSCANNER']._serialized_end=648
 # @@protoc_insertion_point(module_scope)

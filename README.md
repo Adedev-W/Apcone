@@ -63,3 +63,13 @@ docker compose up -d pdf-scanner
 ```
 
 The worker calls `PDF_SCANNER_GRPC_URL`, which defaults to `127.0.0.1:50051`.
+`PDF_RESULT_TTL_SECONDS` only controls how long Redis keeps a completed job result; it is not scan duration.
+
+PDF ingestion profiles each document before choosing a parser:
+
+- simple text PDF: PyMuPDF
+- table/layout candidate: pdfplumber for the candidate pages
+- scanned or mixed PDF: OCRmyPDF only for detected scanned pages
+
+For high traffic, run more `app.workers.run_worker` processes for regular parsing, but keep OCR capacity near available CPU with `PDF_SCANNER_WORKERS` and `PDF_SCANNER_OCR_JOBS`. Text-only OCR is the default path for RAG indexing; searchable OCR PDF generation should be treated as a separate heavy operation.
+If `PDF_SCANNER_USE_SOURCE_PATH=true`, mount the upload storage into the scanner container and set `PDF_SCANNER_ALLOWED_DIR` to that mounted directory.
