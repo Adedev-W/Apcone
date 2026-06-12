@@ -6,9 +6,10 @@ Minimal FastAPI service with PostgreSQL, Redis, and Qdrant.
 
 ```bash
 uv sync
-docker compose up -d postgres redis qdrant
+docker compose up -d 
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload
+
 ```
 
 The default host ports are `5433` for PostgreSQL, `6380` for Redis, `6333` for Qdrant HTTP/UI, and `6334` for Qdrant gRPC.
