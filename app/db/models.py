@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, JSON, String, Text, Uuid, UniqueConstraint, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, JSON, String, Text, Uuid, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -20,14 +20,20 @@ class JobStatus(str, enum.Enum):
 
 class Document(Base):
     __tablename__ = "documents"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "scope", "checksum", name="uq_documents_tenant_scope_checksum"),
+        Index("ix_documents_tenant_scope", "tenant_id", "scope"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(), primary_key=True, default=uuid.uuid4
     )
+    tenant_id: Mapped[str] = mapped_column(String(80), nullable=False, default="default")
+    scope: Mapped[str] = mapped_column(String(80), nullable=False, default="default")
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     source: Mapped[str | None] = mapped_column(String(255), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    checksum: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -67,10 +73,15 @@ class DocumentChunk(Base):
 
 class IngestionJob(Base):
     __tablename__ = "ingestion_jobs"
+    __table_args__ = (
+        Index("ix_ingestion_jobs_tenant_scope", "tenant_id", "scope"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(), primary_key=True, default=uuid.uuid4
     )
+    tenant_id: Mapped[str] = mapped_column(String(80), nullable=False, default="default")
+    scope: Mapped[str] = mapped_column(String(80), nullable=False, default="default")
     document_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True
     )

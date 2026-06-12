@@ -7,7 +7,34 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
+DEFAULT_TENANT_ID = "default"
+DEFAULT_SCOPE = "default"
+TENANT_SCOPE_PATTERN = r"^[A-Za-z0-9_.:-]+$"
+
+
+def tenant_id_field(default: str = DEFAULT_TENANT_ID):
+    return Field(
+        default=default,
+        min_length=1,
+        max_length=80,
+        pattern=TENANT_SCOPE_PATTERN,
+        description="Knowledge base tenant identifier. Use one stable value per team, customer, or internal workspace.",
+    )
+
+
+def scope_field(default: str = DEFAULT_SCOPE):
+    return Field(
+        default=default,
+        min_length=1,
+        max_length=80,
+        pattern=TENANT_SCOPE_PATTERN,
+        description="Knowledge namespace inside the tenant, for example default, project-x, or prod.",
+    )
+
+
 class DocumentCreate(BaseModel):
+    tenant_id: str = tenant_id_field()
+    scope: str = scope_field()
     title: str = Field(min_length=1, max_length=255)
     content: str = Field(min_length=1)
     source: str | None = Field(default=None, max_length=255)
@@ -16,6 +43,8 @@ class DocumentCreate(BaseModel):
 
 class DocumentRead(BaseModel):
     id: UUID
+    tenant_id: str
+    scope: str
     title: str
     source: str | None
     content: str
@@ -28,6 +57,8 @@ class DocumentRead(BaseModel):
 
 class DocumentSummary(BaseModel):
     id: UUID
+    tenant_id: str
+    scope: str
     title: str
     source: str | None
     checksum: str
@@ -39,6 +70,8 @@ class DocumentSummary(BaseModel):
 class ChunkRead(BaseModel):
     id: UUID
     document_id: UUID
+    tenant_id: str
+    scope: str
     chunk_index: int
     content: str
     char_count: int
@@ -55,6 +88,8 @@ class IngestResponse(BaseModel):
 
 class UploadAcceptedResponse(BaseModel):
     job_id: UUID
+    tenant_id: str
+    scope: str
     status: str
     filename: str
     mime_type: str | None = None
@@ -63,6 +98,8 @@ class UploadAcceptedResponse(BaseModel):
 
 class IngestionJobRead(BaseModel):
     id: UUID
+    tenant_id: str
+    scope: str
     document_id: UUID | None
     source_name: str | None
     file_name: str | None
@@ -80,6 +117,8 @@ class IngestionJobRead(BaseModel):
 
 
 class SearchRequest(BaseModel):
+    tenant_id: str = tenant_id_field()
+    scope: str = scope_field()
     query: str = Field(min_length=1)
     top_k: int | None = Field(default=None, ge=1, le=50)
     source: str | None = Field(default=None, max_length=255)
@@ -89,6 +128,8 @@ class SearchRequest(BaseModel):
 class SearchResultItem(BaseModel):
     chunk_id: UUID
     document_id: UUID
+    tenant_id: str
+    scope: str
     document_title: str
     source: str | None
     chunk_index: int
@@ -100,4 +141,3 @@ class SearchResultItem(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     details: dict[str, Any] = Field(default_factory=dict)
-

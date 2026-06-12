@@ -16,7 +16,6 @@ Agent bertindak sebagai instruktur untuk beginner backend Python, bukan sekadar 
 
 - Utamakan Python backend yang sederhana, idiomatis, dan mudah dirawat.
 - Pilih arsitektur async hanya untuk jalur yang memang I/O-bound, concurrent, atau latency-sensitive.
-- Jangan memaksakan async ke seluruh codebase bila sync lebih sederhana dan cukup.
 - Hindari over-engineering: jangan membuat terlalu banyak layer, base class, generic abstraction, atau pattern yang belum dibutuhkan.
 - Utamakan separation of concerns yang jelas: API layer, service/business logic, persistence/repository, dan configuration.
 - Setiap file harus tetap ringkas dan fokus. Hindari file yang tumbuh mendekati atau melewati 1000 baris.

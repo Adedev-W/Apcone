@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.dependencies import build_storage_service
@@ -10,6 +10,8 @@ from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.schemas import (
     ChunkRead,
+    DEFAULT_SCOPE,
+    DEFAULT_TENANT_ID,
     DocumentCreate,
     DocumentRead,
     DocumentSummary,
@@ -17,6 +19,7 @@ from app.schemas import (
     IngestResponse,
     SearchRequest,
     SearchResultItem,
+    TENANT_SCOPE_PATTERN,
     UploadAcceptedResponse,
 )
 from app.services.file_storage import FileStorageService
@@ -37,6 +40,8 @@ def get_storage_service(
 def _to_document_read(document) -> DocumentRead:
     return DocumentRead(
         id=document.id,
+        tenant_id=document.tenant_id,
+        scope=document.scope,
         title=document.title,
         source=document.source,
         content=document.content,
@@ -49,11 +54,17 @@ def _to_document_read(document) -> DocumentRead:
 
 
 @router.get("", response_model=list[DocumentSummary])
-def list_documents(service: RagStorageService = Depends(get_storage_service)) -> list[DocumentSummary]:
-    documents = service.list_documents()
+def list_documents(
+    tenant_id: str = Query(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
+    scope: str = Query(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
+    service: RagStorageService = Depends(get_storage_service),
+) -> list[DocumentSummary]:
+    documents = service.list_documents(tenant_id=tenant_id, scope=scope)
     return [
         DocumentSummary(
             id=document.id,
+            tenant_id=document.tenant_id,
+            scope=document.scope,
             title=document.title,
             source=document.source,
             checksum=document.checksum,
@@ -68,9 +79,11 @@ def list_documents(service: RagStorageService = Depends(get_storage_service)) ->
 @router.get("/{document_id}", response_model=DocumentRead)
 def get_document(
     document_id: UUID,
+    tenant_id: str = Query(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
+    scope: str = Query(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
     service: RagStorageService = Depends(get_storage_service),
 ) -> DocumentRead:
-    document = service.get_document(document_id)
+    document = service.get_document(document_id, tenant_id=tenant_id, scope=scope)
     if document is None:
         raise HTTPException(status_code=404, detail="document not found")
     return _to_document_read(document)
@@ -79,13 +92,17 @@ def get_document(
 @router.get("/{document_id}/chunks", response_model=list[ChunkRead])
 def get_chunks(
     document_id: UUID,
+    tenant_id: str = Query(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
+    scope: str = Query(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
     service: RagStorageService = Depends(get_storage_service),
 ) -> list[ChunkRead]:
-    chunks = service.get_chunks(document_id)
+    chunks = service.get_chunks(document_id, tenant_id=tenant_id, scope=scope)
     return [
         ChunkRead(
             id=chunk.id,
             document_id=chunk.document_id,
+            tenant_id=tenant_id,
+            scope=scope,
             chunk_index=chunk.chunk_index,
             content=chunk.content,
             char_count=chunk.char_count,
@@ -114,6 +131,8 @@ def ingest_document(
 async def upload_document(
     title: str = Form(...),
     content_file: UploadFile = File(...),
+    tenant_id: str = Form(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
+    scope: str = Form(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
     source: str | None = Form(default=None),
     service: RagStorageService = Depends(get_storage_service),
 ) -> IngestResponse:
@@ -124,6 +143,8 @@ async def upload_document(
     raw_content = (await content_file.read()).decode("utf-8")
     result = service.ingest_document(
         DocumentCreate(
+            tenant_id=tenant_id,
+            scope=scope,
             title=title,
             content=raw_content,
             source=source,
@@ -142,12 +163,16 @@ async def upload_document(
 async def upload_document_background(
     title: str = Form(...),
     content_file: UploadFile = File(...),
+    tenant_id: str = Form(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
+    scope: str = Form(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
     source: str | None = Form(default=None),
     settings: Settings = Depends(get_settings),
     service: RagStorageService = Depends(get_storage_service),
 ) -> UploadAcceptedResponse:
     file_storage = FileStorageService(settings.upload_storage_dir)
     job = service.create_job(
+        tenant_id=tenant_id,
+        scope=scope,
         source_name=source,
         file_name=content_file.filename,
         mime_type=content_file.content_type,
@@ -181,6 +206,8 @@ async def upload_document_background(
         raise HTTPException(status_code=503, detail="failed to enqueue background job") from exc
     return UploadAcceptedResponse(
         job_id=job.id,
+        tenant_id=job.tenant_id,
+        scope=job.scope,
         status=job.status.value,
         filename=content_file.filename or stored_path.name,
         mime_type=content_file.content_type,
@@ -197,18 +224,27 @@ def search_documents(
     return service.search(
         query=request.query,
         top_k=request.top_k or settings.search_top_k,
+        tenant_id=request.tenant_id,
+        scope=request.scope,
         document_id=request.document_id,
         source=request.source,
     )
 
 
 @router.get("/jobs/{job_id}", response_model=IngestionJobRead)
-def get_job(job_id: UUID, service: RagStorageService = Depends(get_storage_service)) -> IngestionJobRead:
-    job = service.get_job(job_id)
+def get_job(
+    job_id: UUID,
+    tenant_id: str = Query(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
+    scope: str = Query(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
+    service: RagStorageService = Depends(get_storage_service),
+) -> IngestionJobRead:
+    job = service.get_job(job_id, tenant_id=tenant_id, scope=scope)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     return IngestionJobRead(
         id=job.id,
+        tenant_id=job.tenant_id,
+        scope=job.scope,
         document_id=job.document_id,
         source_name=job.source_name,
         file_name=job.file_name,
@@ -230,10 +266,12 @@ def get_job(job_id: UUID, service: RagStorageService = Depends(get_storage_servi
 @router.post("/{document_id}/reindex", response_model=IngestResponse)
 def reindex_document(
     document_id: UUID,
+    tenant_id: str = Query(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
+    scope: str = Query(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
     service: RagStorageService = Depends(get_storage_service),
 ) -> IngestResponse:
     try:
-        result = service.reindex_document(document_id)
+        result = service.reindex_document(document_id, tenant_id=tenant_id, scope=scope)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return IngestResponse(
@@ -247,6 +285,8 @@ def reindex_document(
 @router.delete("/{document_id}", status_code=204)
 def delete_document(
     document_id: UUID,
+    tenant_id: str = Query(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
+    scope: str = Query(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
     service: RagStorageService = Depends(get_storage_service),
 ) -> None:
-    service.delete_document(document_id)
+    service.delete_document(document_id, tenant_id=tenant_id, scope=scope)

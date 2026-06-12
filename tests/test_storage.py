@@ -62,6 +62,86 @@ def test_duplicate_ingest_is_idempotent(test_context):
         service.db.close()
 
 
+def test_same_payload_isolated_by_tenant_and_scope(test_context):
+    service = _build_service(test_context)
+    try:
+        base_payload = {
+            "title": "Shared Handbook",
+            "content": "tenant scoped knowledge should not leak across workspaces",
+            "source": "handbook.md",
+            "metadata": {"kind": "handbook"},
+        }
+
+        tenant_a = service.ingest_document(
+            DocumentCreate(tenant_id="tenant-a", scope="default", **base_payload)
+        )
+        tenant_b = service.ingest_document(
+            DocumentCreate(tenant_id="tenant-b", scope="default", **base_payload)
+        )
+        project_scope = service.ingest_document(
+            DocumentCreate(tenant_id="tenant-a", scope="project-x", **base_payload)
+        )
+
+        assert tenant_a.document.id != tenant_b.document.id
+        assert tenant_a.document.id != project_scope.document.id
+        assert len(service.list_documents(tenant_id="tenant-a", scope="default")) == 1
+        assert len(service.list_documents(tenant_id="tenant-b", scope="default")) == 1
+        assert len(service.list_documents(tenant_id="tenant-a", scope="project-x")) == 1
+
+        matches = service.search(
+            query="scoped knowledge",
+            top_k=5,
+            tenant_id="tenant-a",
+            scope="default",
+        )
+        assert {match.document_id for match in matches} == {tenant_a.document.id}
+        assert matches[0].tenant_id == "tenant-a"
+        assert matches[0].scope == "default"
+    finally:
+        service.db.close()
+
+
+def test_document_operations_require_matching_tenant_and_scope(test_context):
+    service = _build_service(test_context)
+    try:
+        created = service.ingest_document(
+            DocumentCreate(
+                tenant_id="tenant-a",
+                scope="project-x",
+                title="Private Notes",
+                content="private tenant scope content",
+                source="private.md",
+            )
+        )
+
+        assert service.get_document(
+            created.document.id,
+            tenant_id="tenant-b",
+            scope="project-x",
+        ) is None
+        assert service.get_chunks(
+            created.document.id,
+            tenant_id="tenant-a",
+            scope="default",
+        ) == []
+
+        service.delete_document(created.document.id, tenant_id="tenant-b", scope="project-x")
+        assert service.get_document(
+            created.document.id,
+            tenant_id="tenant-a",
+            scope="project-x",
+        ) is not None
+
+        try:
+            service.reindex_document(created.document.id, tenant_id="tenant-a", scope="default")
+        except LookupError as exc:
+            assert "not found" in str(exc)
+        else:  # pragma: no cover - defensive assertion
+            raise AssertionError("cross-scope reindex should fail")
+    finally:
+        service.db.close()
+
+
 def test_delete_removes_document_and_vectors(test_context):
     service = _build_service(test_context)
     try:

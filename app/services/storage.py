@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.qdrant_store import QdrantChunkStore
 from app.db.models import Document, DocumentChunk, IngestionJob, JobStatus
-from app.schemas import DocumentCreate, SearchResultItem
+from app.schemas import DEFAULT_SCOPE, DEFAULT_TENANT_ID, DocumentCreate, SearchResultItem
 from app.services.chunking import ChunkingService
 from app.services.embeddings import EmbeddingService
 
@@ -41,6 +41,8 @@ class RagStorageService:
     def create_job(
         self,
         *,
+        tenant_id: str = DEFAULT_TENANT_ID,
+        scope: str = DEFAULT_SCOPE,
         source_name: str | None = None,
         file_name: str | None = None,
         mime_type: str | None = None,
@@ -50,6 +52,8 @@ class RagStorageService:
         source_kind: str | None = None,
     ) -> IngestionJob:
         job = IngestionJob(
+            tenant_id=tenant_id,
+            scope=scope,
             source_name=source_name,
             file_name=file_name,
             mime_type=mime_type,
@@ -66,8 +70,19 @@ class RagStorageService:
         self.db.refresh(job)
         return job
 
-    def get_job(self, job_id: UUID) -> IngestionJob | None:
-        return self.db.get(IngestionJob, job_id)
+    def get_job(
+        self,
+        job_id: UUID,
+        *,
+        tenant_id: str | None = None,
+        scope: str | None = None,
+    ) -> IngestionJob | None:
+        statement = select(IngestionJob).where(IngestionJob.id == job_id)
+        if tenant_id is not None:
+            statement = statement.where(IngestionJob.tenant_id == tenant_id)
+        if scope is not None:
+            statement = statement.where(IngestionJob.scope == scope)
+        return self.db.scalar(statement)
 
     def mark_job_running(self, job_id: UUID, parser_name: str | None = None) -> IngestionJob:
         job = self.get_job(job_id)
@@ -129,6 +144,8 @@ class RagStorageService:
     def ingest_extracted_document(
         self,
         *,
+        tenant_id: str = DEFAULT_TENANT_ID,
+        scope: str = DEFAULT_SCOPE,
         title: str,
         content: str,
         source: str | None,
@@ -137,7 +154,14 @@ class RagStorageService:
         parser_name: str | None = None,
         source_name: str | None = None,
     ) -> IngestResult:
-        payload = DocumentCreate(title=title, content=content, source=source, metadata=metadata)
+        payload = DocumentCreate(
+            tenant_id=tenant_id,
+            scope=scope,
+            title=title,
+            content=content,
+            source=source,
+            metadata=metadata,
+        )
         return self._ingest_payload(
             payload=payload,
             source_name=source_name,
@@ -156,15 +180,26 @@ class RagStorageService:
         job_id: UUID | None = None,
         parser_name: str | None = None,
     ) -> IngestResult:
+        job = self.get_job(job_id) if job_id is not None else None
+        if job_id is not None and job is None:
+            raise LookupError(f"job {job_id} not found")
+
+        tenant_id = job.tenant_id if job is not None else payload.tenant_id
+        scope = job.scope if job is not None else payload.scope
+
         checksum = self._checksum(payload)
-        existing = self.db.scalar(select(Document).where(Document.checksum == checksum))
+        existing = self.db.scalar(
+            select(Document).where(
+                Document.tenant_id == tenant_id,
+                Document.scope == scope,
+                Document.checksum == checksum,
+            )
+        )
         if existing is not None:
             if job_id is None:
                 job = self._create_job(document=existing, source_name=source_name, status=JobStatus.completed)
             else:
-                job = self.get_job(job_id)
-                if job is None:
-                    raise LookupError(f"job {job_id} not found")
+                assert job is not None
                 job.document_id = existing.id
                 job.status = JobStatus.completed
                 job.chunk_count = len(existing.chunks)
@@ -178,6 +213,8 @@ class RagStorageService:
 
         if job_id is None:
             job = IngestionJob(
+                tenant_id=tenant_id,
+                scope=scope,
                 source_name=source_name or payload.source,
                 status=JobStatus.running,
                 started_at=datetime.now(timezone.utc),
@@ -187,9 +224,7 @@ class RagStorageService:
             self.db.add(job)
             self.db.flush()
         else:
-            job = self.get_job(job_id)
-            if job is None:
-                raise LookupError(f"job {job_id} not found")
+            assert job is not None
             job.status = JobStatus.running
             job.started_at = datetime.now(timezone.utc)
             job.progress = max(job.progress, 5)
@@ -197,6 +232,8 @@ class RagStorageService:
                 job.parser_name = parser_name
 
         document = Document(
+            tenant_id=tenant_id,
+            scope=scope,
             title=payload.title,
             source=payload.source,
             content=payload.content,
@@ -223,6 +260,8 @@ class RagStorageService:
                 content=chunk.content,
                 char_count=chunk.char_count,
                 metadata_json={
+                    "tenant_id": tenant_id,
+                    "scope": scope,
                     "title": payload.title,
                     "source": payload.source,
                     **payload.metadata,
@@ -238,6 +277,8 @@ class RagStorageService:
                     payload={
                         "chunk_id": str(chunk_row.id),
                         "document_id": str(document.id),
+                        "tenant_id": tenant_id,
+                        "scope": scope,
                         "document_title": document.title,
                         "source": document.source,
                         "chunk_index": chunk_row.chunk_index,
@@ -261,8 +302,14 @@ class RagStorageService:
         self.db.refresh(job)
         return IngestResult(job=job, document=document, chunks_created=len(qdrant_points))
 
-    def reindex_document(self, document_id: UUID) -> IngestResult:
-        document = self.db.get(Document, document_id)
+    def reindex_document(
+        self,
+        document_id: UUID,
+        *,
+        tenant_id: str = DEFAULT_TENANT_ID,
+        scope: str = DEFAULT_SCOPE,
+    ) -> IngestResult:
+        document = self._get_document_for_context(document_id, tenant_id=tenant_id, scope=scope)
         if document is None:
             raise LookupError(f"document {document_id} not found")
 
@@ -272,7 +319,11 @@ class RagStorageService:
             raise ValueError("document has no chunks to reindex")
 
         embeddings = self.embedder.embed_texts([chunk.content for chunk in chunks])
-        self.qdrant_store.delete_document(document.id)
+        self.qdrant_store.delete_document(
+            document_id=document.id,
+            tenant_id=document.tenant_id,
+            scope=document.scope,
+        )
 
         points = []
         for chunk, embedding in zip(chunks, embeddings, strict=True):
@@ -283,6 +334,8 @@ class RagStorageService:
                     payload={
                         "chunk_id": str(chunk.id),
                         "document_id": str(document.id),
+                        "tenant_id": document.tenant_id,
+                        "scope": document.scope,
                         "document_title": document.title,
                         "source": document.source,
                         "chunk_index": chunk.chunk_index,
@@ -303,11 +356,21 @@ class RagStorageService:
         self.db.refresh(job)
         return IngestResult(job=job, document=document, chunks_created=len(points))
 
-    def delete_document(self, document_id: UUID) -> None:
-        document = self.db.get(Document, document_id)
+    def delete_document(
+        self,
+        document_id: UUID,
+        *,
+        tenant_id: str = DEFAULT_TENANT_ID,
+        scope: str = DEFAULT_SCOPE,
+    ) -> None:
+        document = self._get_document_for_context(document_id, tenant_id=tenant_id, scope=scope)
         if document is None:
             return
-        self.qdrant_store.delete_document(document.id)
+        self.qdrant_store.delete_document(
+            document_id=document.id,
+            tenant_id=document.tenant_id,
+            scope=document.scope,
+        )
         self.db.delete(document)
         self.db.commit()
 
@@ -316,6 +379,8 @@ class RagStorageService:
         *,
         query: str,
         top_k: int,
+        tenant_id: str = DEFAULT_TENANT_ID,
+        scope: str = DEFAULT_SCOPE,
         document_id: UUID | None = None,
         source: str | None = None,
     ) -> list[SearchResultItem]:
@@ -323,6 +388,8 @@ class RagStorageService:
         points = self.qdrant_store.search(
             query_vector=query_vector,
             limit=top_k,
+            tenant_id=tenant_id,
+            scope=scope,
             document_id=document_id,
             source=source,
         )
@@ -334,6 +401,8 @@ class RagStorageService:
                 SearchResultItem(
                     chunk_id=UUID(payload["chunk_id"]),
                     document_id=UUID(payload["document_id"]),
+                    tenant_id=str(payload.get("tenant_id", tenant_id)),
+                    scope=str(payload.get("scope", scope)),
                     document_title=str(payload.get("document_title", "")),
                     source=payload.get("source"),
                     chunk_index=int(payload.get("chunk_index", 0)),
@@ -344,17 +413,42 @@ class RagStorageService:
             )
         return results
 
-    def list_documents(self, limit: int = 100) -> list[Document]:
-        statement = select(Document).order_by(Document.created_at.desc()).limit(limit)
+    def list_documents(
+        self,
+        *,
+        tenant_id: str = DEFAULT_TENANT_ID,
+        scope: str = DEFAULT_SCOPE,
+        limit: int = 100,
+    ) -> list[Document]:
+        statement = (
+            select(Document)
+            .where(Document.tenant_id == tenant_id, Document.scope == scope)
+            .order_by(Document.created_at.desc())
+            .limit(limit)
+        )
         return list(self.db.scalars(statement))
 
-    def get_document(self, document_id: UUID) -> Document | None:
-        return self.db.get(Document, document_id)
+    def get_document(
+        self,
+        document_id: UUID,
+        *,
+        tenant_id: str = DEFAULT_TENANT_ID,
+        scope: str = DEFAULT_SCOPE,
+    ) -> Document | None:
+        return self._get_document_for_context(document_id, tenant_id=tenant_id, scope=scope)
 
-    def get_chunks(self, document_id: UUID) -> list[DocumentChunk]:
+    def get_chunks(
+        self,
+        document_id: UUID,
+        *,
+        tenant_id: str = DEFAULT_TENANT_ID,
+        scope: str = DEFAULT_SCOPE,
+    ) -> list[DocumentChunk]:
         statement = (
             select(DocumentChunk)
+            .join(Document)
             .where(DocumentChunk.document_id == document_id)
+            .where(Document.tenant_id == tenant_id, Document.scope == scope)
             .order_by(DocumentChunk.chunk_index.asc())
         )
         return list(self.db.scalars(statement))
@@ -367,6 +461,8 @@ class RagStorageService:
         status: JobStatus,
     ) -> IngestionJob:
         job = IngestionJob(
+            tenant_id=document.tenant_id,
+            scope=document.scope,
             document_id=document.id,
             source_name=source_name,
             status=status,
@@ -378,6 +474,21 @@ class RagStorageService:
         self.db.commit()
         self.db.refresh(job)
         return job
+
+    def _get_document_for_context(
+        self,
+        document_id: UUID,
+        *,
+        tenant_id: str,
+        scope: str,
+    ) -> Document | None:
+        return self.db.scalar(
+            select(Document).where(
+                Document.id == document_id,
+                Document.tenant_id == tenant_id,
+                Document.scope == scope,
+            )
+        )
 
     @staticmethod
     def _checksum(payload: DocumentCreate) -> str:

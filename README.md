@@ -51,6 +51,11 @@ Core endpoints:
 - `POST /documents/{document_id}/reindex`
 - `DELETE /documents/{document_id}`
 
+Document APIs and MCP tools support tenant-scoped knowledge namespaces with
+`tenant_id` and `scope`. Existing calls default to `tenant_id=default` and
+`scope=default`; pass explicit values when multiple teams, projects, or agent
+workspaces share the same Apcone service.
+
 Worker:
 
 ```bash

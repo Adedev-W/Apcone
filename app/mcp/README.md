@@ -6,7 +6,9 @@ same storage, chunking, embedding, and vector search services used by the HTTP
 document API.
 
 The MCP server is built with `FastMCP` and is mounted into the main FastAPI app
-at `/mcp`.
+at `/mcp`. It uses Streamable HTTP in stateless mode so framework clients such
+as Agno and LangChain can connect to one internal HTTP endpoint without relying
+on in-memory session affinity.
 
 ## Overview
 
@@ -15,6 +17,8 @@ at `/mcp`.
 - Server name: `RAG Tools`
 - Version: `0.1.0`
 - HTTP mount path: `/mcp`
+- Transport: Streamable HTTP
+- HTTP state mode: stateless
 - Tool registration module: `app/mcp/tools.py`
 
 `app/main.py` mounts the MCP ASGI app:
@@ -30,6 +34,9 @@ MCP endpoint is available under:
 ```text
 http://127.0.0.1:8000/mcp
 ```
+
+Agent frameworks should configure the MCP transport as Streamable HTTP. For
+Agno this is `transport="streamable-http"` with `url="http://127.0.0.1:8000/mcp"`.
 
 ## Runtime Dependencies
 
@@ -75,6 +82,23 @@ uv run uvicorn app.main:app --reload
 Redis is not used directly by the current MCP tools, but it is part of the
 project's broader document upload and worker stack.
 
+## Tenant and Scope Model
+
+Every knowledge tool is tenant-scoped:
+
+- `tenant_id` identifies the owner of the knowledge base, such as a team,
+  customer, or workspace.
+- `scope` identifies a namespace inside that tenant, such as `default`,
+  `project-x`, or `prod`.
+
+The MCP tools require `tenant_id` and default `scope` to `default`. Search,
+delete, reindex, and vector deletion never cross the provided tenant and scope.
+The same document content can be ingested into different tenants or scopes
+without sharing document rows or vectors.
+
+Allowed `tenant_id` and `scope` values may contain letters, numbers, `_`, `-`,
+`.`, and `:` and are limited to 80 characters.
+
 ## Tools
 
 ### `search_documents`
@@ -86,6 +110,8 @@ Inputs:
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `query` | `str` | Yes | Natural-language search query. |
+| `tenant_id` | `str` | Yes | Tenant whose knowledge base should be searched. |
+| `scope` | `str` | No | Knowledge namespace inside the tenant. Defaults to `default`. |
 | `top_k` | `int \| None` | No | Maximum number of results. Uses `SEARCH_TOP_K` when omitted. |
 | `source` | `str \| None` | No | Optional source filter. |
 | `document_id` | `UUID \| None` | No | Optional document filter. |
@@ -94,12 +120,18 @@ Output:
 
 ```json
 {
+  "status": "ok",
+  "tenant_id": "team-a",
+  "scope": "default",
   "query": "refund policy",
   "top_k": 5,
+  "result_count": 1,
   "results": [
     {
       "chunk_id": "uuid",
       "document_id": "uuid",
+      "tenant_id": "team-a",
+      "scope": "default",
       "document_title": "Policy Handbook",
       "source": "handbook",
       "chunk_index": 0,
@@ -130,6 +162,8 @@ Inputs:
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
+| `tenant_id` | `str` | Yes | Tenant that owns the new knowledge document. |
+| `scope` | `str` | No | Knowledge namespace inside the tenant. Defaults to `default`. |
 | `title` | `str` | Yes | Document title. Must not be empty and must be at most 255 characters. |
 | `content` | `str` | Yes | Plain text document content. Must not be empty. |
 | `source` | `str \| None` | No | Optional source name or external reference. |
@@ -139,11 +173,15 @@ Output:
 
 ```json
 {
-  "job_id": "uuid",
   "status": "completed",
+  "tenant_id": "team-a",
+  "scope": "default",
+  "job_id": "uuid",
   "chunks_created": 3,
   "document": {
     "id": "uuid",
+    "tenant_id": "team-a",
+    "scope": "default",
     "title": "Policy Handbook",
     "source": "handbook",
     "content": "full document text",
@@ -178,14 +216,18 @@ Inputs:
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
+| `tenant_id` | `str` | Yes | Tenant that owns the document. |
 | `document_id` | `UUID` | Yes | ID of the document to reindex. |
+| `scope` | `str` | No | Knowledge namespace inside the tenant. Defaults to `default`. |
 
 Output:
 
 ```json
 {
-  "job_id": "uuid",
   "status": "completed",
+  "tenant_id": "team-a",
+  "scope": "default",
+  "job_id": "uuid",
   "chunks_created": 3,
   "document_id": "uuid"
 }
@@ -202,6 +244,7 @@ How it works:
 Important behavior:
 
 - The document must exist.
+- A document in another tenant or scope is treated as not found.
 - The document must already have chunks.
 - This tool does not re-chunk the original document content. It reuses the
   existing stored chunks.
@@ -217,23 +260,28 @@ Inputs:
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
+| `tenant_id` | `str` | Yes | Tenant that owns the document. |
 | `document_id` | `UUID` | Yes | ID of the document to delete. |
+| `scope` | `str` | No | Knowledge namespace inside the tenant. Defaults to `default`. |
 
 Output:
 
 ```json
 {
   "status": "deleted",
+  "tenant_id": "team-a",
+  "scope": "default",
   "document_id": "uuid"
 }
 ```
 
 Important behavior:
 
-- If the document exists, its Qdrant vectors are deleted first, then the
-  PostgreSQL document row is deleted.
-- If the document does not exist, the storage service returns without raising an
-  error. The MCP tool still returns a `deleted` status for the requested ID.
+- If the document exists in the provided tenant and scope, its Qdrant vectors
+  are deleted first, then the PostgreSQL document row is deleted.
+- If the document does not exist in that tenant and scope, the storage service
+  returns without raising an error. The MCP tool still returns a `deleted`
+  status for the requested ID.
 - Related chunks are removed through the database relationship behavior defined
   by the document model.
 
@@ -314,12 +362,13 @@ MCP client
 
 ## Notes and Limitations
 
-- MCP currently exposes document search and text ingestion tools only.
+- MCP currently exposes tenant-scoped document search, text ingestion, reindex,
+  delete, and dependency health tools.
 - MCP does not expose PDF upload, PDF profiling, OCR fallback, or Redis queue
   management.
-- Tool errors are not converted into custom MCP error payloads in this module.
-  Validation, lookup, database, embedding, or Qdrant failures are allowed to
-  propagate through FastMCP.
+- Tool errors are converted into stable MCP `ToolError` messages such as
+  `VALIDATION_ERROR`, `DOCUMENT_NOT_FOUND`, `STORAGE_ERROR`, and
+  `DEPENDENCY_ERROR`.
 - The current MCP module does not define authentication or authorization. If the
   app is exposed outside a trusted development environment, protect the FastAPI
   service at the deployment or middleware layer.

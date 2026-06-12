@@ -27,10 +27,17 @@ class QdrantChunkStore:
         *,
         query_vector: Sequence[float],
         limit: int,
+        tenant_id: str,
+        scope: str,
         document_id: UUID | None = None,
         source: str | None = None,
     ) -> list[models.ScoredPoint]:
-        query_filter = self._build_filter(document_id=document_id, source=source)
+        query_filter = self._build_filter(
+            tenant_id=tenant_id,
+            scope=scope,
+            document_id=document_id,
+            source=source,
+        )
         response = self.client.query_points(
             collection_name=self.collection_name,
             query=list(query_vector),
@@ -41,16 +48,13 @@ class QdrantChunkStore:
         )
         return response.points
 
-    def delete_document(self, document_id: UUID) -> None:
+    def delete_document(self, *, document_id: UUID, tenant_id: str, scope: str) -> None:
         self.client.delete(
             collection_name=self.collection_name,
-            points_selector=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="document_id",
-                        match=models.MatchValue(value=str(document_id)),
-                    )
-                ]
+            points_selector=self._build_filter(
+                tenant_id=tenant_id,
+                scope=scope,
+                document_id=document_id,
             ),
             wait=True,
         )
@@ -62,10 +66,21 @@ class QdrantChunkStore:
     def _build_filter(
         self,
         *,
+        tenant_id: str,
+        scope: str,
         document_id: UUID | None = None,
         source: str | None = None,
-    ) -> models.Filter | None:
-        must: list[models.FieldCondition] = []
+    ) -> models.Filter:
+        must: list[models.FieldCondition] = [
+            models.FieldCondition(
+                key="tenant_id",
+                match=models.MatchValue(value=tenant_id),
+            ),
+            models.FieldCondition(
+                key="scope",
+                match=models.MatchValue(value=scope),
+            ),
+        ]
         if document_id is not None:
             must.append(
                 models.FieldCondition(
@@ -80,7 +95,4 @@ class QdrantChunkStore:
                     match=models.MatchValue(value=source),
                 )
             )
-        if not must:
-            return None
         return models.Filter(must=must)
-

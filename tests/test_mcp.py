@@ -13,7 +13,7 @@ def test_mcp_mount_is_registered() -> None:
 
 def test_mcp_registers_agent_tools() -> None:
     tools = asyncio.run(mcp.list_tools())
-    tool_names = {tool.name for tool in tools}
+    tool_by_name = {tool.name: tool for tool in tools}
 
     assert {
         "search_documents",
@@ -21,4 +21,20 @@ def test_mcp_registers_agent_tools() -> None:
         "reindex_document",
         "delete_document",
         "health",
-    }.issubset(tool_names)
+    }.issubset(tool_by_name)
+
+
+def test_mcp_tools_describe_tenant_scope_contract() -> None:
+    tools = asyncio.run(mcp.list_tools())
+    tool_by_name = {tool.name: tool for tool in tools}
+
+    for tool_name in ["search_documents", "ingest_document", "reindex_document", "delete_document"]:
+        tool = tool_by_name[tool_name]
+        assert tool.description
+        assert "tenant" in tool.description.lower()
+        assert "tenant_id" in tool.parameters["required"]
+        assert tool.parameters["properties"]["tenant_id"]["pattern"] == "^[A-Za-z0-9_.:-]+$"
+        assert tool.parameters["properties"]["scope"]["default"] == "default"
+
+    assert tool_by_name["search_documents"].annotations.readOnlyHint is True
+    assert tool_by_name["delete_document"].annotations.destructiveHint is True
