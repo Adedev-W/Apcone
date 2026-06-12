@@ -57,6 +57,13 @@ Worker:
 uv run python -m app.workers.run_worker
 ```
 
+The worker uses a short RQ heartbeat/dequeue cycle by default
+(`RQ_WORKER_TTL_SECONDS=120`) so an idle queue does not leave a Redis blocking
+read open long enough to be closed by the connection path. Redis client
+timeouts can be tuned with `REDIS_SOCKET_TIMEOUT_SECONDS`,
+`REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS`, and
+`REDIS_HEALTH_CHECK_INTERVAL_SECONDS`.
+
 PDF OCR fallback runs through the Alpine-based gRPC scanner service:
 
 ```bash

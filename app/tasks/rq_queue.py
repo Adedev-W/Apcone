@@ -7,7 +7,13 @@ from app.core.config import Settings
 
 
 def get_redis_connection(settings: Settings) -> Redis:
-    return Redis.from_url(settings.redis_url)
+    return Redis.from_url(
+        settings.redis_url,
+        socket_timeout=settings.redis_socket_timeout_seconds,
+        socket_connect_timeout=settings.redis_socket_connect_timeout_seconds,
+        health_check_interval=settings.redis_health_check_interval_seconds,
+        socket_keepalive=True,
+    )
 
 
 def get_pdf_queue(settings: Settings) -> Queue:

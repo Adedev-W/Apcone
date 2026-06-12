@@ -9,7 +9,11 @@ from app.tasks.rq_queue import get_pdf_queues
 def main() -> None:
     settings = get_settings()
     queues = get_pdf_queues(settings)
-    worker = Worker(queues, connection=queues[0].connection)
+    worker = Worker(
+        queues,
+        connection=queues[0].connection,
+        worker_ttl=settings.rq_worker_ttl_seconds,
+    )
     worker.work()
 
 

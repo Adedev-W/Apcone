@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 from qdrant_client import QdrantClient
-from redis import Redis
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -10,6 +9,7 @@ from app.adapters.qdrant_store import QdrantChunkStore
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.schemas import HealthResponse
+from app.tasks.rq_queue import get_redis_connection
 
 router = APIRouter(prefix="/health", tags=["health"])
 
@@ -27,7 +27,7 @@ def health_postgres(db: Session = Depends(get_db)) -> HealthResponse:
 
 @router.get("/redis", response_model=HealthResponse)
 def health_redis(settings: Settings = Depends(get_settings)) -> HealthResponse:
-    client = Redis.from_url(settings.redis_url)
+    client = get_redis_connection(settings)
     client.ping()
     return HealthResponse(status="ok", details={"redis": "reachable"})
 
