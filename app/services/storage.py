@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
 from qdrant_client import models
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.adapters.qdrant_store import QdrantChunkStore
@@ -43,6 +44,7 @@ class RagStorageService:
         *,
         tenant_id: str = DEFAULT_TENANT_ID,
         scope: str = DEFAULT_SCOPE,
+        title: str | None = None,
         source_name: str | None = None,
         file_name: str | None = None,
         mime_type: str | None = None,
@@ -54,6 +56,7 @@ class RagStorageService:
         job = IngestionJob(
             tenant_id=tenant_id,
             scope=scope,
+            title=title,
             source_name=source_name,
             file_name=file_name,
             mime_type=mime_type,
@@ -292,13 +295,20 @@ class RagStorageService:
             if job_id is not None:
                 job.progress = min(95, 5 + int(((chunk.index + 1) / total) * 90))
 
-        self.qdrant_store.upsert_chunks(points=qdrant_points)
+        self.db.commit()
+        self.db.refresh(document)
+        self.db.refresh(job)
+        try:
+            self.qdrant_store.upsert_chunks(points=qdrant_points)
+        except Exception as exc:
+            self.mark_job_failed(job.id, f"vector upsert failed: {exc}")
+            raise
+
         job.status = JobStatus.completed
         job.chunk_count = len(qdrant_points)
         job.progress = 100
         job.finished_at = datetime.now(timezone.utc)
         self.db.commit()
-        self.db.refresh(document)
         self.db.refresh(job)
         return IngestResult(job=job, document=document, chunks_created=len(qdrant_points))
 
@@ -319,12 +329,6 @@ class RagStorageService:
             raise ValueError("document has no chunks to reindex")
 
         embeddings = self.embedder.embed_texts([chunk.content for chunk in chunks])
-        self.qdrant_store.delete_document(
-            document_id=document.id,
-            tenant_id=document.tenant_id,
-            scope=document.scope,
-        )
-
         points = []
         for chunk, embedding in zip(chunks, embeddings, strict=True):
             points.append(
@@ -347,10 +351,21 @@ class RagStorageService:
                 )
             )
 
-        self.qdrant_store.ensure_collection(vector_size=len(embeddings[0]))
-        self.qdrant_store.upsert_chunks(points=points)
+        try:
+            self.qdrant_store.ensure_collection(vector_size=len(embeddings[0]))
+            self.qdrant_store.delete_document(
+                document_id=document.id,
+                tenant_id=document.tenant_id,
+                scope=document.scope,
+            )
+            self.qdrant_store.upsert_chunks(points=points)
+        except Exception as exc:
+            self.mark_job_failed(job.id, f"vector reindex failed: {exc}")
+            raise
+
         job.status = JobStatus.completed
         job.chunk_count = len(points)
+        job.progress = 100
         job.finished_at = datetime.now(timezone.utc)
         self.db.commit()
         self.db.refresh(job)
@@ -394,24 +409,85 @@ class RagStorageService:
             source=source,
         )
 
-        results: list[SearchResultItem] = []
+        results_by_chunk: dict[UUID, SearchResultItem] = {}
         for point in points:
             payload = point.payload or {}
+            item = SearchResultItem(
+                chunk_id=UUID(payload["chunk_id"]),
+                document_id=UUID(payload["document_id"]),
+                tenant_id=str(payload.get("tenant_id", tenant_id)),
+                scope=str(payload.get("scope", scope)),
+                document_title=str(payload.get("document_title", "")),
+                source=payload.get("source"),
+                chunk_index=int(payload.get("chunk_index", 0)),
+                content=str(payload.get("content", "")),
+                score=float(point.score),
+                metadata=dict(payload.get("metadata") or {}),
+            )
+            results_by_chunk[item.chunk_id] = item
+
+        for item in self._lexical_search(
+            query=query,
+            top_k=top_k,
+            tenant_id=tenant_id,
+            scope=scope,
+            document_id=document_id,
+            source=source,
+        ):
+            existing = results_by_chunk.get(item.chunk_id)
+            if existing is None or item.score > existing.score:
+                results_by_chunk[item.chunk_id] = item
+
+        return sorted(results_by_chunk.values(), key=lambda item: item.score, reverse=True)[:top_k]
+
+    def _lexical_search(
+        self,
+        *,
+        query: str,
+        top_k: int,
+        tenant_id: str,
+        scope: str,
+        document_id: UUID | None = None,
+        source: str | None = None,
+    ) -> list[SearchResultItem]:
+        tokens = self._query_tokens(query)
+        if not tokens:
+            return []
+        statement = (
+            select(DocumentChunk, Document)
+            .join(Document)
+            .where(Document.tenant_id == tenant_id, Document.scope == scope)
+        )
+        if document_id is not None:
+            statement = statement.where(Document.id == document_id)
+        if source is not None:
+            statement = statement.where(Document.source == source)
+        statement = statement.where(
+            or_(*(DocumentChunk.content.ilike(f"%{token}%") for token in tokens))
+        ).limit(top_k * 3)
+
+        results: list[SearchResultItem] = []
+        for chunk, document in self.db.execute(statement):
+            text_lower = chunk.content.lower()
+            matches = sum(1 for token in tokens if token in text_lower)
+            if matches == 0:
+                continue
+            score = 1.0 + matches / len(tokens)
             results.append(
                 SearchResultItem(
-                    chunk_id=UUID(payload["chunk_id"]),
-                    document_id=UUID(payload["document_id"]),
-                    tenant_id=str(payload.get("tenant_id", tenant_id)),
-                    scope=str(payload.get("scope", scope)),
-                    document_title=str(payload.get("document_title", "")),
-                    source=payload.get("source"),
-                    chunk_index=int(payload.get("chunk_index", 0)),
-                    content=str(payload.get("content", "")),
-                    score=float(point.score),
-                    metadata=dict(payload.get("metadata") or {}),
+                    chunk_id=chunk.id,
+                    document_id=document.id,
+                    tenant_id=document.tenant_id,
+                    scope=document.scope,
+                    document_title=document.title,
+                    source=document.source,
+                    chunk_index=chunk.chunk_index,
+                    content=chunk.content,
+                    score=score,
+                    metadata=document.metadata_json,
                 )
             )
-        return results
+        return sorted(results, key=lambda item: item.score, reverse=True)[:top_k]
 
     def list_documents(
         self,
@@ -501,3 +577,7 @@ class RagStorageService:
         digest.update(b"\0")
         digest.update(json.dumps(payload.metadata, sort_keys=True, separators=(",", ":")).encode("utf-8"))
         return digest.hexdigest()
+
+    @staticmethod
+    def _query_tokens(query: str) -> list[str]:
+        return [token.lower() for token in re.findall(r"[A-Za-z0-9_:-]+", query) if len(token) >= 2]

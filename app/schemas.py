@@ -91,6 +91,7 @@ class UploadAcceptedResponse(BaseModel):
     tenant_id: str
     scope: str
     status: str
+    title: str
     filename: str
     mime_type: str | None = None
     parser_hint: str | None = None
@@ -101,6 +102,7 @@ class IngestionJobRead(BaseModel):
     tenant_id: str
     scope: str
     document_id: UUID | None
+    title: str | None
     source_name: str | None
     file_name: str | None
     mime_type: str | None

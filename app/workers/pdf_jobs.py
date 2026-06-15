@@ -98,7 +98,7 @@ def process_profiled_document(job_id: str) -> dict[str, object]:
         if suffix in {".txt", ".md", ".rst"} or mime_type.startswith("text/"):
             content = file_path.read_text(encoding="utf-8")
             result = service.ingest_extracted_document(
-                title=Path(job.file_name or file_path.name).stem,
+                title=job.title or Path(job.file_name or file_path.name).stem,
                 content=content,
                 source=job.source_name,
                 metadata={
@@ -143,7 +143,7 @@ def process_profiled_document(job_id: str) -> dict[str, object]:
             page_count=extracted.page_count,
         )
         result = service.ingest_extracted_document(
-            title=Path(job.file_name or file_path.name).stem,
+            title=job.title or Path(job.file_name or file_path.name).stem,
             content=extracted.content,
             source=job.source_name,
             metadata={

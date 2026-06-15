@@ -13,6 +13,7 @@ class QdrantChunkStore:
 
     def ensure_collection(self, vector_size: int) -> None:
         if self.client.collection_exists(self.collection_name):
+            self._validate_vector_size(vector_size)
             return
         self.client.create_collection(
             collection_name=self.collection_name,
@@ -62,6 +63,18 @@ class QdrantChunkStore:
     def health(self) -> bool:
         self.client.get_collections()
         return True
+
+    def _validate_vector_size(self, vector_size: int) -> None:
+        collection = self.client.get_collection(self.collection_name)
+        vectors = collection.config.params.vectors
+        configured_size = getattr(vectors, "size", None)
+        if configured_size is None and isinstance(vectors, dict):
+            default_vector = vectors.get("")
+            configured_size = getattr(default_vector, "size", None)
+        if configured_size is not None and configured_size != vector_size:
+            raise ValueError(
+                f"qdrant collection vector size mismatch: expected {configured_size}, got {vector_size}"
+            )
 
     def _build_filter(
         self,

@@ -67,6 +67,10 @@ Document APIs and MCP tools support tenant-scoped knowledge namespaces with
 `scope=default`; pass explicit values when multiple teams, projects, or agent
 workspaces share the same Apcone service.
 
+Search combines Qdrant vector retrieval with a small PostgreSQL lexical fallback
+inside the same tenant and scope. This keeps exact keyword matches discoverable
+when vector ranking misses a chunk.
+
 CLI:
 
 ```bash
@@ -103,6 +107,9 @@ PDF ingestion profiles each document before choosing a parser:
 - simple text PDF: PyMuPDF
 - table/layout candidate: pdfplumber for the candidate pages
 - scanned or mixed PDF: OCRmyPDF only for detected scanned pages
+
+The title submitted to `/documents/upload-document` is stored on the ingestion
+job and used as the final document title when the worker finishes processing.
 
 For high traffic, run more `app.workers.run_worker` processes for regular parsing, but keep OCR capacity near available CPU with `PDF_SCANNER_WORKERS` and `PDF_SCANNER_OCR_JOBS`. Text-only OCR is the default path for RAG indexing; searchable OCR PDF generation should be treated as a separate heavy operation.
 If `PDF_SCANNER_USE_SOURCE_PATH=true`, mount the upload storage into the scanner container and set `PDF_SCANNER_ALLOWED_DIR` to that mounted directory.

@@ -51,3 +51,28 @@ def test_api_key_role_hierarchy() -> None:
     assert role_allows("admin", "read") is True
     assert role_allows("write", "read") is True
     assert role_allows("read", "write") is False
+
+
+def test_api_key_last_used_update_is_throttled(test_context):
+    session = test_context["session_factory"]()
+    try:
+        service = ApiKeyService(session)
+        created = service.create_key(name="throttled", tenant_id="default")
+
+        first = service.verify_key(created.secret)
+        assert first is not None
+        first_seen = first.last_used_at
+        assert first_seen is not None
+
+        second = service.verify_key(created.secret)
+        assert second is not None
+        assert second.last_used_at == first_seen
+
+        second.last_used_at = datetime.now(timezone.utc) - timedelta(minutes=2)
+        session.commit()
+        third = service.verify_key(created.secret)
+        assert third is not None
+        assert third.last_used_at is not None
+        assert third.last_used_at > first_seen
+    finally:
+        session.close()

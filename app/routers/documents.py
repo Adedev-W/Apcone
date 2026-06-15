@@ -152,7 +152,10 @@ async def upload_document(
         ".pdf"
     ):
         raise HTTPException(status_code=400, detail="use /documents/upload-document for PDF uploads")
-    raw_content = (await content_file.read()).decode("utf-8")
+    try:
+        raw_content = (await content_file.read()).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="invalid text encoding; expected UTF-8") from exc
     result = service.ingest_document(
         DocumentCreate(
             tenant_id=tenant_id,
@@ -187,6 +190,7 @@ async def upload_document_background(
     job = service.create_job(
         tenant_id=tenant_id,
         scope=scope,
+        title=title,
         source_name=source,
         file_name=content_file.filename,
         mime_type=content_file.content_type,
@@ -223,6 +227,7 @@ async def upload_document_background(
         tenant_id=job.tenant_id,
         scope=job.scope,
         status=job.status.value,
+        title=title,
         filename=content_file.filename or stored_path.name,
         mime_type=content_file.content_type,
         parser_hint="auto",
@@ -264,6 +269,7 @@ def get_job(
         tenant_id=job.tenant_id,
         scope=job.scope,
         document_id=job.document_id,
+        title=job.title,
         source_name=job.source_name,
         file_name=job.file_name,
         mime_type=job.mime_type,

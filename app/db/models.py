@@ -129,6 +129,7 @@ class IngestionJob(Base):
     document_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     file_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mime_type: Mapped[str | None] = mapped_column(String(127), nullable=True)

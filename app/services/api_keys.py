@@ -14,6 +14,7 @@ from app.db.models import ApiKey, ApiKeyRole
 
 API_KEY_PREFIX = "apc_"
 API_KEY_VISIBLE_PREFIX_LENGTH = 12
+LAST_USED_UPDATE_INTERVAL_SECONDS = 60
 ROLE_RANK = {
     ApiKeyRole.read.value: 1,
     ApiKeyRole.write.value: 2,
@@ -87,7 +88,7 @@ class ApiKeyService:
             return None
         if not self._is_usable(api_key):
             return None
-        if update_last_used:
+        if update_last_used and self._should_update_last_used(api_key):
             api_key.last_used_at = datetime.now(timezone.utc)
             self.db.commit()
             self.db.refresh(api_key)
@@ -142,3 +143,13 @@ class ApiKeyService:
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         return expires_at > datetime.now(timezone.utc)
+
+    @staticmethod
+    def _should_update_last_used(api_key: ApiKey) -> bool:
+        if api_key.last_used_at is None:
+            return True
+        last_used_at = api_key.last_used_at
+        if last_used_at.tzinfo is None:
+            last_used_at = last_used_at.replace(tzinfo=timezone.utc)
+        elapsed = datetime.now(timezone.utc) - last_used_at
+        return elapsed.total_seconds() >= LAST_USED_UPDATE_INTERVAL_SECONDS

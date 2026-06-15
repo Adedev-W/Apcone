@@ -23,7 +23,11 @@ class FileStorageService:
         return destination
 
     def resolve(self, stored_path: str) -> Path:
-        return Path(stored_path)
+        base_dir = self.base_dir.resolve()
+        candidate = Path(stored_path).resolve()
+        if base_dir != candidate and base_dir not in candidate.parents:
+            raise ValueError("stored file path is outside upload storage directory")
+        return candidate
 
     @staticmethod
     def _sanitize_filename(filename: str) -> str:

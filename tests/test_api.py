@@ -135,6 +135,23 @@ def test_api_pdf_upload_enqueues_background_job(client, auth_headers, monkeypatc
     assert response.status_code == 202
     payload = response.json()
     assert payload["status"] == "pending"
+    assert payload["title"] == "Sample PDF"
     assert payload["parser_hint"] == "auto"
     assert fake_queue.enqueued
     assert fake_queue.enqueued[0][1][0]
+
+
+def test_api_text_upload_rejects_non_utf8(client, auth_headers, tmp_path):
+    invalid_path = tmp_path / "invalid.txt"
+    invalid_path.write_bytes(b"\xff\xfe\x00")
+
+    with invalid_path.open("rb") as handle:
+        response = client.post(
+            "/documents/upload",
+            headers=auth_headers,
+            data={"title": "Invalid Text"},
+            files={"content_file": ("invalid.txt", handle, "text/plain")},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid text encoding; expected UTF-8"

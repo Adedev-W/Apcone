@@ -82,6 +82,7 @@ def _job_payload(job: IngestionJob) -> dict[str, Any]:
         "tenant_id": job.tenant_id,
         "scope": job.scope,
         "document_id": job.document_id,
+        "title": job.title,
         "source_name": job.source_name,
         "file_name": job.file_name,
         "mime_type": job.mime_type,
