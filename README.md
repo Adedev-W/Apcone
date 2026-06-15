@@ -62,6 +62,48 @@ Core endpoints:
 - `POST /documents/{document_id}/reindex`
 - `DELETE /documents/{document_id}`
 
+Async Python SDK:
+
+```python
+import asyncio
+
+from apcone_sdk import ApconeAsyncClient, ApconeMCPClient
+
+
+async def main() -> None:
+    api_key = "<apcone_api_key>"
+
+    async with ApconeAsyncClient(
+        "http://127.0.0.1:8000",
+        api_key,
+        tenant_id="default",
+        scope="default",
+    ) as client:
+        created = await client.ingest_document(
+            title="SDK note",
+            content="Apcone can search tenant-scoped documents.",
+            source="sdk-example",
+        )
+        results = await client.search_documents("tenant-scoped search")
+        print(created.document.id, results[0].content)
+
+    mcp_client = ApconeMCPClient.from_base_url(
+        "http://127.0.0.1:8000",
+        api_key,
+        tenant_id="default",
+        scope="default",
+    )
+    mcp_results = await mcp_client.search_documents("tenant-scoped search")
+    print(mcp_results.result_count)
+
+
+asyncio.run(main())
+```
+
+The HTTP SDK wraps the FastAPI endpoints directly. The MCP SDK wraps the
+agent-facing MCP tools over Streamable HTTP. Both are async-only and use the
+same API key, tenant, and scope model as the raw API.
+
 Document APIs and MCP tools support tenant-scoped knowledge namespaces with
 `tenant_id` and `scope`. Existing calls default to `tenant_id=default` and
 `scope=default`; pass explicit values when multiple teams, projects, or agent

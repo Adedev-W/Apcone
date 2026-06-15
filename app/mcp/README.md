@@ -336,6 +336,34 @@ Important behavior:
 Use this tool before running ingest, search, reindex, or delete operations from
 an MCP client.
 
+## Python Client SDK
+
+Use `ApconeMCPClient` when Python code needs a small typed wrapper around the
+MCP tools:
+
+```python
+import asyncio
+
+from apcone_sdk import ApconeMCPClient
+
+
+async def main() -> None:
+    client = ApconeMCPClient.from_base_url(
+        "http://127.0.0.1:8000",
+        "<apcone_api_key>",
+        tenant_id="default",
+        scope="default",
+    )
+    results = await client.search_documents("refund policy", top_k=3)
+    print(results.result_count)
+
+
+asyncio.run(main())
+```
+
+The SDK passes the API key through FastMCP bearer auth for HTTP transports and
+returns Pydantic models for the structured tool responses.
+
 ## Data Flow
 
 Text ingestion flow:
@@ -381,9 +409,8 @@ MCP client
 - Tool errors are converted into stable MCP `ToolError` messages such as
   `VALIDATION_ERROR`, `DOCUMENT_NOT_FOUND`, `STORAGE_ERROR`, and
   `DEPENDENCY_ERROR`.
-- The current MCP module does not define authentication or authorization. If the
-  app is exposed outside a trusted development environment, protect the FastAPI
-  service at the deployment or middleware layer.
+- The MCP endpoint requires a valid Apcone API key as a bearer token and enforces
+  tenant, scope, and role checks inside each protected tool.
 - `top_k` defaults to `SEARCH_TOP_K` when omitted. MCP clients should keep this
   value small because it maps directly to the Qdrant search limit.
 
