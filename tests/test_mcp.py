@@ -38,3 +38,17 @@ def test_mcp_tools_describe_tenant_scope_contract() -> None:
 
     assert tool_by_name["search_documents"].annotations.readOnlyHint is True
     assert tool_by_name["delete_document"].annotations.destructiveHint is True
+
+
+def test_mcp_http_requires_api_key(client) -> None:
+    response = client.post("/mcp/", json={})
+    assert response.status_code == 401
+
+
+def test_mcp_http_accepts_valid_api_key(client, auth_headers, monkeypatch, test_context) -> None:
+    from app.mcp import server as mcp_server
+
+    monkeypatch.setattr(mcp_server, "SessionLocal", test_context["session_factory"])
+
+    response = client.post("/mcp/", headers=auth_headers, json={})
+    assert response.status_code != 401

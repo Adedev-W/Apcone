@@ -5,8 +5,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
-from app.dependencies import build_storage_service
+from app.dependencies import ApiKeyPrincipal, build_storage_service
+from app.dependencies import ensure_api_key_context, require_api_key
 from app.core.config import Settings, get_settings
+from app.db.models import ApiKeyRole
 from app.db.session import get_db
 from app.schemas import (
     ChunkRead,
@@ -57,8 +59,10 @@ def _to_document_read(document) -> DocumentRead:
 def list_documents(
     tenant_id: str = Query(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
     scope: str = Query(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
+    principal: ApiKeyPrincipal = Depends(require_api_key(ApiKeyRole.read.value)),
     service: RagStorageService = Depends(get_storage_service),
 ) -> list[DocumentSummary]:
+    ensure_api_key_context(principal, tenant_id=tenant_id, scope=scope)
     documents = service.list_documents(tenant_id=tenant_id, scope=scope)
     return [
         DocumentSummary(
@@ -81,8 +85,10 @@ def get_document(
     document_id: UUID,
     tenant_id: str = Query(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
     scope: str = Query(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
+    principal: ApiKeyPrincipal = Depends(require_api_key(ApiKeyRole.read.value)),
     service: RagStorageService = Depends(get_storage_service),
 ) -> DocumentRead:
+    ensure_api_key_context(principal, tenant_id=tenant_id, scope=scope)
     document = service.get_document(document_id, tenant_id=tenant_id, scope=scope)
     if document is None:
         raise HTTPException(status_code=404, detail="document not found")
@@ -94,8 +100,10 @@ def get_chunks(
     document_id: UUID,
     tenant_id: str = Query(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
     scope: str = Query(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
+    principal: ApiKeyPrincipal = Depends(require_api_key(ApiKeyRole.read.value)),
     service: RagStorageService = Depends(get_storage_service),
 ) -> list[ChunkRead]:
+    ensure_api_key_context(principal, tenant_id=tenant_id, scope=scope)
     chunks = service.get_chunks(document_id, tenant_id=tenant_id, scope=scope)
     return [
         ChunkRead(
@@ -116,8 +124,10 @@ def get_chunks(
 @router.post("/ingest", response_model=IngestResponse, status_code=201)
 def ingest_document(
     payload: DocumentCreate,
+    principal: ApiKeyPrincipal = Depends(require_api_key(ApiKeyRole.write.value)),
     service: RagStorageService = Depends(get_storage_service),
 ) -> IngestResponse:
+    ensure_api_key_context(principal, tenant_id=payload.tenant_id, scope=payload.scope)
     result = service.ingest_document(payload)
     return IngestResponse(
         job_id=result.job.id,
@@ -134,8 +144,10 @@ async def upload_document(
     tenant_id: str = Form(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
     scope: str = Form(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
     source: str | None = Form(default=None),
+    principal: ApiKeyPrincipal = Depends(require_api_key(ApiKeyRole.write.value)),
     service: RagStorageService = Depends(get_storage_service),
 ) -> IngestResponse:
+    ensure_api_key_context(principal, tenant_id=tenant_id, scope=scope)
     if (content_file.content_type or "").lower() == "application/pdf" or (content_file.filename or "").lower().endswith(
         ".pdf"
     ):
@@ -166,9 +178,11 @@ async def upload_document_background(
     tenant_id: str = Form(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
     scope: str = Form(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
     source: str | None = Form(default=None),
+    principal: ApiKeyPrincipal = Depends(require_api_key(ApiKeyRole.write.value)),
     settings: Settings = Depends(get_settings),
     service: RagStorageService = Depends(get_storage_service),
 ) -> UploadAcceptedResponse:
+    ensure_api_key_context(principal, tenant_id=tenant_id, scope=scope)
     file_storage = FileStorageService(settings.upload_storage_dir)
     job = service.create_job(
         tenant_id=tenant_id,
@@ -218,9 +232,11 @@ async def upload_document_background(
 @router.post("/search", response_model=list[SearchResultItem])
 def search_documents(
     request: SearchRequest,
+    principal: ApiKeyPrincipal = Depends(require_api_key(ApiKeyRole.read.value)),
     settings: Settings = Depends(get_settings),
     service: RagStorageService = Depends(get_storage_service),
 ) -> list[SearchResultItem]:
+    ensure_api_key_context(principal, tenant_id=request.tenant_id, scope=request.scope)
     return service.search(
         query=request.query,
         top_k=request.top_k or settings.search_top_k,
@@ -236,8 +252,10 @@ def get_job(
     job_id: UUID,
     tenant_id: str = Query(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
     scope: str = Query(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
+    principal: ApiKeyPrincipal = Depends(require_api_key(ApiKeyRole.read.value)),
     service: RagStorageService = Depends(get_storage_service),
 ) -> IngestionJobRead:
+    ensure_api_key_context(principal, tenant_id=tenant_id, scope=scope)
     job = service.get_job(job_id, tenant_id=tenant_id, scope=scope)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
@@ -268,8 +286,10 @@ def reindex_document(
     document_id: UUID,
     tenant_id: str = Query(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
     scope: str = Query(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
+    principal: ApiKeyPrincipal = Depends(require_api_key(ApiKeyRole.write.value)),
     service: RagStorageService = Depends(get_storage_service),
 ) -> IngestResponse:
+    ensure_api_key_context(principal, tenant_id=tenant_id, scope=scope)
     try:
         result = service.reindex_document(document_id, tenant_id=tenant_id, scope=scope)
     except LookupError as exc:
@@ -287,6 +307,8 @@ def delete_document(
     document_id: UUID,
     tenant_id: str = Query(default=DEFAULT_TENANT_ID, pattern=TENANT_SCOPE_PATTERN),
     scope: str = Query(default=DEFAULT_SCOPE, pattern=TENANT_SCOPE_PATTERN),
+    principal: ApiKeyPrincipal = Depends(require_api_key(ApiKeyRole.admin.value)),
     service: RagStorageService = Depends(get_storage_service),
 ) -> None:
+    ensure_api_key_context(principal, tenant_id=tenant_id, scope=scope)
     service.delete_document(document_id, tenant_id=tenant_id, scope=scope)

@@ -28,15 +28,27 @@ app.mount("/mcp", mcp_app)
 ```
 
 This means MCP clients should connect to the running FastAPI service through the
-`/mcp` path. If the app is running locally with the default Uvicorn command, the
+`/mcp/` path. If the app is running locally with the default Uvicorn command, the
 MCP endpoint is available under:
 
 ```text
-http://127.0.0.1:8000/mcp
+http://127.0.0.1:8000/mcp/
 ```
 
 Agent frameworks should configure the MCP transport as Streamable HTTP. For
-Agno this is `transport="streamable-http"` with `url="http://127.0.0.1:8000/mcp"`.
+Agno this is `transport="streamable-http"` with `url="http://127.0.0.1:8000/mcp/"`.
+
+MCP clients must send a valid API key as a bearer token:
+
+```text
+Authorization: Bearer <apcone_api_key>
+```
+
+Create keys locally with:
+
+```bash
+uv run python -m app.cli api-key create --name mcp-client --tenant-id default --role write
+```
 
 ## Runtime Dependencies
 

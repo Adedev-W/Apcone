@@ -39,6 +39,17 @@ curl http://127.0.0.1:6333
 
 Qdrant dashboard is available at `http://127.0.0.1:6333/dashboard`.
 
+API key auth:
+
+```bash
+uv run python -m app.cli api-key create --name local-admin --tenant-id default --role admin
+export APCONE_API_KEY=<api_key_from_create_output>
+```
+
+Document APIs and MCP require an API key. Use either
+`Authorization: Bearer $APCONE_API_KEY` or `X-API-Key: $APCONE_API_KEY`.
+The root endpoint and health endpoints stay public for liveness checks.
+
 Core endpoints:
 
 - `POST /documents/ingest`
@@ -55,6 +66,15 @@ Document APIs and MCP tools support tenant-scoped knowledge namespaces with
 `tenant_id` and `scope`. Existing calls default to `tenant_id=default` and
 `scope=default`; pass explicit values when multiple teams, projects, or agent
 workspaces share the same Apcone service.
+
+CLI:
+
+```bash
+uv run python -m app.cli health
+uv run python -m app.cli api-key list
+uv run python -m app.cli documents list --tenant-id default --scope default
+uv run python -m app.cli jobs list --tenant-id default --scope default
+```
 
 Worker:
 

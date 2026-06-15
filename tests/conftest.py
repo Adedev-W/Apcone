@@ -25,6 +25,7 @@ from app.routers.documents import get_storage_service
 from app.routers.health import get_settings
 from app.services.chunking import ChunkingService
 from app.services.embeddings import EmbeddingService
+from app.services.api_keys import ApiKeyService
 from app.services.storage import RagStorageService
 
 
@@ -106,3 +107,17 @@ def test_context(tmp_path: Path):
 def client(test_context):
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture()
+def auth_headers(test_context):
+    session = test_context["session_factory"]()
+    try:
+        created = ApiKeyService(session).create_key(
+            name="test-admin",
+            tenant_id="default",
+            role="admin",
+        )
+        return {"Authorization": f"Bearer {created.secret}"}
+    finally:
+        session.close()

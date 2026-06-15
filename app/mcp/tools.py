@@ -7,17 +7,19 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastmcp.exceptions import ToolError
+from fastmcp.server.dependencies import get_access_token
 from mcp.types import ToolAnnotations
 from pydantic import Field
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import get_settings
-from app.db.models import Document
+from app.db.models import ApiKeyRole, Document
 from app.db.session import SessionLocal
 from app.dependencies import build_storage_service
 from app.mcp.server import mcp
 from app.schemas import DEFAULT_SCOPE, TENANT_SCOPE_PATTERN, DocumentCreate
+from app.services.api_keys import role_allows
 
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,21 @@ def _document_payload(document: Document) -> dict[str, Any]:
     }
 
 
+def _ensure_mcp_access(*, tenant_id: str, scope: str, required_role: str) -> None:
+    token = get_access_token()
+    if token is None:
+        raise ToolError("AUTHENTICATION_REQUIRED: api key required")
+    token_tenant_id = token.claims.get("tenant_id")
+    token_scope = token.claims.get("scope")
+    token_role = str(token.claims.get("role") or "")
+    if token_tenant_id != tenant_id:
+        raise ToolError("AUTHORIZATION_ERROR: api key cannot access this tenant")
+    if token_scope is not None and token_scope != scope:
+        raise ToolError("AUTHORIZATION_ERROR: api key cannot access this scope")
+    if not role_allows(token_role, required_role):
+        raise ToolError("AUTHORIZATION_ERROR: insufficient api key role")
+
+
 def _log_tool_success(
     *,
     tool_name: str,
@@ -94,6 +111,8 @@ def _raise_tool_error(
     tenant_id: str | None = None,
     scope: str | None = None,
 ) -> None:
+    if isinstance(exc, ToolError):
+        raise exc
     if isinstance(exc, LookupError):
         code = "DOCUMENT_NOT_FOUND"
         message = str(exc)
@@ -144,6 +163,11 @@ def search_documents(
 ) -> dict[str, Any]:
     started_at = time.perf_counter()
     try:
+        _ensure_mcp_access(
+            tenant_id=tenant_id,
+            scope=scope,
+            required_role=ApiKeyRole.read.value,
+        )
         settings = get_settings()
         resolved_top_k = top_k or settings.search_top_k
         with _storage_service() as service:
@@ -208,6 +232,11 @@ def ingest_document(
 ) -> dict[str, Any]:
     started_at = time.perf_counter()
     try:
+        _ensure_mcp_access(
+            tenant_id=tenant_id,
+            scope=scope,
+            required_role=ApiKeyRole.write.value,
+        )
         payload = DocumentCreate(
             tenant_id=tenant_id,
             scope=scope,
@@ -267,6 +296,11 @@ def reindex_document(
 ) -> dict[str, Any]:
     started_at = time.perf_counter()
     try:
+        _ensure_mcp_access(
+            tenant_id=tenant_id,
+            scope=scope,
+            required_role=ApiKeyRole.write.value,
+        )
         with _storage_service() as service:
             result = service.reindex_document(document_id, tenant_id=tenant_id, scope=scope)
         response = {
@@ -318,6 +352,11 @@ def delete_document(
 ) -> dict[str, str]:
     started_at = time.perf_counter()
     try:
+        _ensure_mcp_access(
+            tenant_id=tenant_id,
+            scope=scope,
+            required_role=ApiKeyRole.admin.value,
+        )
         with _storage_service() as service:
             service.delete_document(document_id, tenant_id=tenant_id, scope=scope)
         _log_tool_success(
